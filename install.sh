@@ -17,8 +17,15 @@ fi
 
 echo "Provisioning storage at $WORKING_DIR..."
 sudo mkdir -p "$WORKING_DIR"
+
+sudo touch "$WORKING_DIR/pmx-log.json"
+sudo touch "$WORKING_DIR/pmx-running-log.json"
+sudo echo "{}" > "$WORKING_DIR/pmx-log.json"
+sudo echo "{}" > "$WORKING_DIR/pmx-running-log.json"
+
 sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$WORKING_DIR"
 sudo chmod 755 "$WORKING_DIR"
+sudo chmod -R o+w "$WORKING_DIR"
 
 echo "Moving binary to $INSTALL_PATH..."
 sudo cp "./$BINARY_NAME" "$INSTALL_PATH"

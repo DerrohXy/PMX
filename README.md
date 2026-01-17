@@ -1,1 +1,1 @@
-# Simple process manager
+# Simple process manager for linux platforms

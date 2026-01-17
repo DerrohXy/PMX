@@ -243,7 +243,13 @@ func stopProcessId(pid string) error {
 
 	process_, err := os.FindProcess(int(pid_))
 	if err != nil {
-		return fmt.Errorf("failed to identify process: %w", err)
+
+		return nil
+	}
+
+	err = process_.Signal(syscall.Signal(0))
+	if err != nil {
+		return nil
 	}
 
 	err = process_.Kill()
@@ -267,6 +273,7 @@ func stopProcess(process PMXProcess) error {
 
 	err = stopProcessId(pid)
 	if err != nil {
+
 		return fmt.Errorf("failed to kill process %s: %w", pid, err)
 	}
 
@@ -274,7 +281,7 @@ func stopProcess(process PMXProcess) error {
 
 	err = writeJson(RUNNING_PROCESS_LOG_FILEPATH, runningLog)
 	if err != nil {
-		return fmt.Errorf("failed to update runninglog.")
+		return fmt.Errorf("failed to update running log.")
 	}
 
 	return nil
@@ -366,6 +373,43 @@ func runStop(args []string) error {
 	return nil
 }
 
+func runRemove(args []string) error {
+	runningLog, err := loadRunningProcessLog()
+	if err != nil {
+		return err
+	}
+
+	processLog, err := loadProcessLog()
+	if err != nil {
+		return err
+	}
+
+	for _, processName := range args {
+		process, exists := processLog[processName]
+		if exists {
+			_, isRunning := runningLog[processName]
+			if isRunning {
+				err = stopProcess(process)
+
+				if err != nil {
+					return err
+				}
+			}
+
+			delete(processLog, process.Name)
+
+			err = writeJson(PROCESS_LOG_FILEPATH, processLog)
+			if err != nil {
+				return fmt.Errorf("failed to update process log.")
+			}
+		}
+	}
+
+	runLs()
+
+	return nil
+}
+
 func runLs() error {
 	runningLog, err := loadRunningProcessLog()
 	if err != nil {
@@ -409,49 +453,14 @@ func runLs() error {
 }
 
 func showLastLines(filepath string, lineCount int) {
-	file, err := os.Open(filepath)
+	cmd := exec.Command("tail", "-n", strconv.Itoa(lineCount), filepath)
+
+	output, err := cmd.Output()
 	if err != nil {
 		return
 	}
 
-	defer file.Close()
-
-	stat, _ := file.Stat()
-	filesize := stat.Size()
-
-	var cursor int64 = 0
-	var foundLines = 0
-	var result []byte
-
-	for cursor < filesize && foundLines <= lineCount {
-		cursor += 1024
-		if cursor > filesize {
-			cursor = filesize
-		}
-
-		file.Seek(-cursor, io.SeekEnd)
-		char := make([]byte, cursor)
-		file.Read(char)
-
-		count := 0
-		for i := len(char) - 1; i >= 0; i-- {
-			if char[i] == '\n' {
-				count++
-				if count > lineCount {
-					result = char[i+1:]
-					foundLines = count
-					break
-				}
-			}
-		}
-
-		if cursor == filesize {
-			result = char
-			break
-		}
-	}
-
-	os.Stdout.Write(result)
+	log.Println(string(output))
 }
 
 func tailFile(filepath string) error {
@@ -498,7 +507,7 @@ func runLogs(args []string) error {
 		return fmt.Errorf("process '%s' not found in registry", processName)
 	}
 
-	lineCount := 10
+	lineCount := 5
 	for _, arg := range args[1:] {
 		if strings.HasPrefix(arg, "lines=") {
 			val := strings.TrimPrefix(arg, "lines=")
@@ -589,9 +598,9 @@ func runMonitor() error {
 }
 
 type ResponseItem struct {
-	Name   string        `json:"name"`
-	Status string        `json:"status"`
-	Stats  *ProcessStats `json:"stats,omitempty"`
+	Name   string        `json:"Name"`
+	Status string        `json:"Status"`
+	Stats  *ProcessStats `json:"Stats,omitempty"`
 }
 
 func runServe(args []string) error {
@@ -657,6 +666,74 @@ func runServe(args []string) error {
 		}
 	})
 
+	http.HandleFunc("/stop", func(res http.ResponseWriter, req *http.Request) {
+		res.Header().Set("Content-Type", "application/json")
+
+		processLog, _ := loadProcessLog()
+
+		processName := req.URL.Query().Get("name")
+
+		if processName != "" {
+			entry, exists := processLog[processName]
+			if exists {
+				err := stopProcess(entry)
+				if err != nil {
+					json.NewEncoder(res).Encode(map[string]any{
+						"Error": "Unable to stop process.",
+					})
+				}
+
+				json.NewEncoder(res).Encode(map[string]any{
+					"Message": "Process stopped.",
+				})
+
+			} else {
+				json.NewEncoder(res).Encode(map[string]any{
+					"Error": "Unknown process name.",
+				})
+			}
+
+		} else {
+			json.NewEncoder(res).Encode(map[string]any{
+				"Error": "Process name is required.",
+			})
+		}
+	})
+
+	http.HandleFunc("/start", func(res http.ResponseWriter, req *http.Request) {
+		res.Header().Set("Content-Type", "application/json")
+
+		processLog, _ := loadProcessLog()
+
+		processName := req.URL.Query().Get("name")
+
+		if processName != "" {
+			entry, exists := processLog[processName]
+			if exists {
+				_, err := startProcess(entry)
+				if err != nil {
+					json.NewEncoder(res).Encode(map[string]any{
+						"Error": "Unable to start process.",
+					})
+				}
+
+				json.NewEncoder(res).Encode(map[string]any{
+					"Message": "Process started.",
+				})
+
+			} else {
+				json.NewEncoder(res).Encode(map[string]any{
+					"Error": "Unknown process name.",
+				})
+			}
+
+		} else {
+			json.NewEncoder(res).Encode(map[string]any{
+				"Error": "Process name is required.",
+			})
+		}
+	})
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "PMX Monitoring Server is active. Visit /status for process details.")
 	})
@@ -677,8 +754,9 @@ func runHelp() {
 
 	fmt.Fprintln(w, "  start <name|file.json>\tStarts a registered process or loads from a JSON config")
 	fmt.Fprintln(w, "  stop <name|file.json>\tKills a running process by name or config")
+	fmt.Fprintln(w, "  remove <name>\tRemoves a process from the registry. Stops it if running")
 	fmt.Fprintln(w, "  ls\tLists all registered processes and their live stats")
-	fmt.Fprintln(w, "  logs <name> [lines=N]\tTails logs for a process (default last 10 lines)")
+	fmt.Fprintln(w, "  logs <name> [lines=N]\tTails logs for a process (default last 5 lines)")
 	fmt.Fprintln(w, "  monitor\tStarts the auto-restart daemon (Runs in foreground)")
 	w.Flush()
 
@@ -707,6 +785,9 @@ func main() {
 
 		case "stop":
 			err = runStop(args[1:])
+
+		case "remove":
+			err = runRemove(args[1:])
 
 		case "ls":
 			err = runLs()
