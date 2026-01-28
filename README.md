@@ -6,7 +6,7 @@ cd PMX
 sudo bash install.sh
 
 # After installation, to manage an array of processes
-# Sample json
+# Sample json file, config.json : [{"Name":"process1","Cmd":"venv/bin/python3","Args":["server.py","--port", "3001"],"Stdout":"server.log","AutoRestart":true}]
 
 # Starting / restarting
 pmx start config.json
