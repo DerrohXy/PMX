@@ -20,8 +20,10 @@ sudo mkdir -p "$WORKING_DIR"
 
 sudo touch "$WORKING_DIR/pmx-log.json"
 sudo touch "$WORKING_DIR/pmx-running-log.json"
+sudo touch "$WORKING_DIR/pmx-stopped-log.json"
 sudo echo "{}" > "$WORKING_DIR/pmx-log.json"
 sudo echo "{}" > "$WORKING_DIR/pmx-running-log.json"
+sudo echo "{}" > "$WORKING_DIR/pmx-stopped-log.json"
 
 sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$WORKING_DIR"
 sudo chmod 755 "$WORKING_DIR"

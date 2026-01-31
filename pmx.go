@@ -19,6 +19,7 @@ var (
 	SERVICE_WORKING_DIR          = "/var/lib/pmx"
 	PROCESS_LOG_FILEPATH         = SERVICE_WORKING_DIR + "/pmx-log.json"
 	RUNNING_PROCESS_LOG_FILEPATH = SERVICE_WORKING_DIR + "/pmx-running-log.json"
+	STOPPED_PROCESS_LOG_FILEPATH = SERVICE_WORKING_DIR + "/pmx-stopped-log.json"
 )
 
 type PMXProcess struct {
@@ -40,6 +41,8 @@ type ProcessStats struct {
 type PMXProcessLog map[string]PMXProcess
 
 type PMXRunningProcessLog map[string]string
+
+type PMXStoppedProcessLog map[string]bool
 
 func init() {
 	os.MkdirAll(SERVICE_WORKING_DIR, 0755)
@@ -117,6 +120,23 @@ func loadRunningProcessLog() (PMXRunningProcessLog, error) {
 	}
 
 	err = writeJson(RUNNING_PROCESS_LOG_FILEPATH, log)
+	if err != nil {
+		return nil, err
+	}
+
+	return log, nil
+}
+
+func loadStoppedProcessLog() (PMXStoppedProcessLog, error) {
+	log := make(PMXStoppedProcessLog)
+
+	err := readJson(STOPPED_PROCESS_LOG_FILEPATH, &log)
+
+	if err != nil {
+		return nil, err
+	}
+
+	err = writeJson(STOPPED_PROCESS_LOG_FILEPATH, log)
 	if err != nil {
 		return nil, err
 	}
@@ -266,6 +286,11 @@ func stopProcess(process PMXProcess) error {
 		return err
 	}
 
+	stoppedLog, err := loadStoppedProcessLog()
+	if err != nil {
+		return err
+	}
+
 	pid, isRunning := runningLog[process.Name]
 	if !isRunning {
 		return nil
@@ -275,6 +300,12 @@ func stopProcess(process PMXProcess) error {
 	if err != nil {
 
 		return fmt.Errorf("failed to kill process %s: %w", pid, err)
+	}
+
+	stoppedLog[process.Name] = true
+	err = writeJson(STOPPED_PROCESS_LOG_FILEPATH, stoppedLog)
+	if err != nil {
+		return fmt.Errorf("failed to update stopped log.")
 	}
 
 	delete(runningLog, process.Name)
@@ -563,12 +594,24 @@ func runMonitor() error {
 			continue
 		}
 
+		stoppedLog, err := loadStoppedProcessLog()
+		if err != nil {
+			return err
+		}
+
 		for name, config := range processLog {
 			if !config.AutoRestart {
 				continue
 			}
 
+			stopped, _ := stoppedLog[name]
+
+			if stopped {
+				continue
+			}
+
 			pidStr, isRunning := runningLog[name]
+
 			shouldRestart := false
 
 			if !isRunning {
